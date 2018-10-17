@@ -1,0 +1,50 @@
+SELECT source,
+         num_sources,
+         state,
+         onetcode,
+         visits,
+         applications,
+         age,
+         cpa
+FROM 
+    (SELECT 
+         array_join(array_distinct(array_agg(source)), ', ') AS source,
+         COUNT(DISTINCT source) as num_sources,
+         array_join(array_distinct(array_agg(jobs_data.state)), ', ') AS state,
+         jobs_data.onetcode AS onetcode,
+         SUM(t1.visitspaid) AS visits,
+         SUM(t1.applicationspaid) AS applications,
+         (MAX(to_unixtime(t1.timestamp))-AVG(jobs_data.created))/86400 AS age,
+         SUM(t1.bestcost)/SUM(t1.applicationspaid)/10000 AS cpa
+         FROM (
+           SELECT
+              CASE
+              WHEN aggregates.applicationspaid=0
+                  OR aggregates.medium != 'CPA' THEN 0
+              ELSE aggregates.bestcost
+              END AS bestcost,
+              aggregates.jobid,
+              aggregates.clientid,
+              aggregates.applicationspaid,
+              aggregates.applicationstotal,
+              aggregates.source,
+              aggregates.visitspaid,
+              aggregates.timestamp,
+              aggregates.medium
+           FROM aggregates
+         ) t1
+         INNER JOIN (
+           SELECT jobs_data.jobid,
+             jobs_data.clientid,
+             array_join(array_distinct(array_agg(jobs_data.state)), ', ') AS state,
+             AVG(to_unixtime(datecreatedclient)) AS created,
+             jobs_data.onetcode
+           FROM jobs_data
+           GROUP BY  jobid, clientid, onetcode
+         ) jobs_data
+         ON jobs_data.jobid = t1.jobid
+           AND jobs_data.clientid = t1.clientid
+         WHERE t1.jobid != ''
+           AND t1.medium = 'CPA'
+         GROUP BY  t1.jobid, t1.clientid, jobs_data.onetcode)
+WHERE NOT is_nan(cpa) AND cpa != 0
